@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dónde lo veo</title>
+<style>
+  :root {
+    --bg: #14171c;
+    --line: #262b33;
+    --ink: #f2efe9;
+    --sub: #9aa1ac;
+    --accent: #e8b23d;
+    --accent-dim: rgba(232,178,61,0.14);
+    --danger: #e2857a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    margin: 0;
+    padding: 32px 20px;
+  }
+  .wrap { max-width: 460px; margin: 0 auto; }
+  h1 {
+    font-family: Georgia, 'Iowan Old Style', 'Times New Roman', serif;
+    font-style: italic;
+    font-weight: 700;
+    font-size: 30px;
+    margin: 0 0 6px;
+    letter-spacing: -0.5px;
+  }
+  .sub { color: var(--sub); font-size: 14px; line-height: 1.5; margin: 0 0 24px; }
+  form { display: flex; gap: 8px; margin-bottom: 16px; }
+  input[type=text] {
+    flex: 1; padding: 13px 16px; font-size: 15px; border-radius: 24px;
+    border: 1px solid var(--line); background: #1c2027; color: var(--ink); outline: none;
+  }
+  button {
+    padding: 0 22px; border-radius: 24px; border: none;
+    background: var(--accent); color: #1c1500; font-weight: 700; font-size: 14px; cursor: pointer;
+  }
+  details { margin-bottom: 28px; font-size: 13px; color: var(--sub); border-bottom: 1px solid var(--line); padding-bottom: 16px; }
+  summary { cursor: pointer; color: var(--ink); }
+  details p { line-height: 1.6; margin-top: 8px; }
+  details input { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--line); background: #1c2027; color: var(--ink); margin-top: 4px; }
+  .msg { color: var(--sub); font-size: 14px; }
+  .msg.error { color: var(--danger); }
+  .row { display: flex; gap: 14px; padding: 16px 0; border-bottom: 1px solid var(--line); }
+  .row img, .row .noimg { width: 52px; border-radius: 4px; flex-shrink: 0; }
+  .row .noimg { height: 78px; background: var(--line); }
+  .title { font-size: 15.5px; }
+  .title .year { color: var(--sub); }
+  .tags { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+  .tag { font-size: 12px; background: var(--accent-dim); color: var(--accent); padding: 3px 9px; border-radius: 6px; }
+  .none { font-size: 13px; color: var(--sub); margin-top: 8px; }
+  .link { font-size: 12.5px; color: var(--sub); margin-top: 8px; display: inline-block; text-decoration: underline; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Dónde lo veo</h1>
+  <p class="sub">Escribe una peli o serie y te digo en qué plataforma de las tuyas está.</p>
+
+  <form id="searchForm">
+    <input type="text" id="query" placeholder="Breaking Bad, Dune...">
+    <button type="submit">Buscar</button>
+  </form>
+
+  <details>
+    <summary>Configurar API key de TMDB</summary>
+    <p>Gratis en themoviedb.org: crea cuenta → Configuración → API → pide una key de desarrollador. Te la dan al momento.</p>
+    <input type="text" id="apiKey" placeholder="Pega tu API key aquí">
+  </details>
+
+  <div id="status"></div>
+  <div id="results"></div>
+</div>
+
+<script>
+const REGION = 'ES';
+const form = document.getElementById('searchForm');
+const queryInput = document.getElementById('query');
+const apiKeyInput = document.getElementById('apiKey');
+const statusEl = document.getElementById('status');
+const resultsEl = document.getElementById('results');
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const apiKey = apiKeyInput.value.trim();
+  const query = queryInput.value.trim();
+  resultsEl.innerHTML = '';
+
+  if (!apiKey) {
+    statusEl.innerHTML = '<p class="msg error">Falta tu API key de TMDB — pégala abajo primero.</p>';
+    return;
+  }
+  if (!query) return;
+
+  statusEl.innerHTML = '<p class="msg">Buscando…</p>';
+
+  try {
+    const res = await fetch(`https://api.themoviedb.org/3/search/multi?api_key=${apiKey}&query=${encodeURIComponent(query)}&language=es-ES`);
+    if (!res.ok) throw new Error('key');
+    const data = await res.json();
+    const items = (data.results || [])
+      .filter(r => r.media_type === 'movie' || r.media_type === 'tv')
+      .slice(0, 8);
+
+    if (items.length === 0) {
+      statusEl.innerHTML = '<p class="msg">Nada con ese nombre. Prueba a escribirlo distinto.</p>';
+      return;
+    }
+
+    const withProviders = await Promise.all(items.map(async (item) => {
+      const provRes = await fetch(`https://api.themoviedb.org/3/${item.media_type}/${item.id}/watch/providers?api_key=${apiKey}`);
+      const provData = await provRes.json();
+      return { ...item, providers: provData.results ? provData.results[REGION] : null };
+    }));
+
+    statusEl.innerHTML = '';
+    resultsEl.innerHTML = withProviders.map(renderRow).join('');
+  } catch (err) {
+    statusEl.innerHTML = '<p class="msg error">La API key no es válida, o algo falló en la búsqueda.</p>';
+  }
+});
+
+function renderRow(item) {
+  const title = item.title || item.name;
+  const year = (item.release_date || item.first_air_date || '').slice(0, 4);
+  const flatrate = (item.providers && item.providers.flatrate) || [];
+  const link = item.providers && item.providers.link;
+
+  const poster = item.poster_path
+    ? `<img src="https://image.tmdb.org/t/p/w92${item.poster_path}" alt="">`
+    : `<div class="noimg"></div>`;
+
+  const tags = flatrate.length > 0
+    ? `<div class="tags">${flatrate.map(p => `<span class="tag">${p.provider_name}</span>`).join('')}</div>`
+    : `<div class="none">No está en tus plataformas ahora mismo</div>`;
+
+  const linkHtml = link ? `<a class="link" href="${link}" target="_blank" rel="noreferrer">Ficha en JustWatch</a>` : '';
+
+  return `
+    <div class="row">
+      ${poster}
+      <div style="min-width:0">
+        <div class="title">${title} ${year ? `<span class="year">(${year})</span>` : ''}</div>
+        ${tags}
+        ${linkHtml}
+      </div>
+    </div>
+  `;
+}
+</script>
+</body>
+</html>
